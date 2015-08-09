@@ -4,7 +4,7 @@
 // @namespace   fear.math@gmail.com
 // @description Records a path (such as an FWE trade route) and allows the player to quickly retrace the path by pressing one key multiple times.
 // @include     http*://*.pardus.at/*main.php*
-// @version     2.21
+// @version     2.3
 // @grant       GM_setValue
 // @grant       GM_getValue
 // @grant       GM_deleteValue
