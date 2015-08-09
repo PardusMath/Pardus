@@ -17,7 +17,6 @@
 var advance_key = "H";
 //END USER VARIABLE
 
-
 // Determine user location (tile ID)
 var userloc;
 var squad = false;
@@ -270,7 +269,7 @@ function next() {
         // If you're inside a SB and off the path, exit fly close. Allows fast entering/exiting until you enter on the correct tile.
         if (document.body.innerHTML.indexOf("sb_space") != -1) {
             if (path.indexOf(userloc.toString()) == -1) {
-                location.assign(enter_exit);
+                unsafeWindow.location.href = enter_exit;
                 return;
             }
         }
@@ -278,26 +277,26 @@ function next() {
         for (i = 1; i < path.length-1; i++) {
             if (path[i] == userloc) {
                 if (sectors[i] == sectors[i+1]) {
-                    location.assign( "javascript:nav(" + path[i+1] + ");" );
+                    unsafeWindow.location.href = "javascript:nav(" + path[i+1] + ")";
                     return;
                 } else {
                     var centreImg = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2].getElementsByTagName("IMG")[0].src;
                     if (centreImg.indexOf("starbase") != -1) {
                         if (squad) {
-                            location.assign(enter_exit);
+                            unsafeWindow.location.href = enter_exit;
                             return;
                         } else if (location.href.indexOf("exit") == -1) {
-                            location.assign( location.href + "?entersb=1" );
+                            unsafeWindow.location.href = location.href + "?entersb=1";
                             return;
                         } else {
-                            location.assign( location.href.substr(0,location.href.indexOf("exit")-1) + "?entersb=1" );
+                            unsafeWindow.location.href = location.href.substr(0,location.href.indexOf("exit")-1) + "?entersb=1";
                             return;
                         }
                     } else if (document.body.innerHTML.indexOf("sb_space") != -1) {
-                        location.assign(enter_exit);
+                        unsafeWindow.location.href = enter_exit;
                         return;
                     } else {
-                        location.assign( "javascript:warp(" + path[i] + ");" );
+                        unsafeWindow.location.href = "javascript:warp(" + path[i] + ")";
                         return;
                     }
                 }
