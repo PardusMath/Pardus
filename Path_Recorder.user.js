@@ -4,7 +4,10 @@
 // @namespace   fear.math@gmail.com
 // @description Records a path (such as an FWE trade route) and allows the player to quickly retrace the path by pressing one key multiple times.
 // @include     http*://*.pardus.at/*main.php*
-// @version     2.3
+// @version     3
+// @require     http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js
+// @require     https://greasyfork.org/scripts/1003-wait-for-key-elements/code/Wait%20for%20key%20elements.js?version=49342
+// @grant       GM_addStyle
 // @grant       GM_setValue
 // @grant       GM_getValue
 // @grant       GM_deleteValue
@@ -16,36 +19,6 @@
 //USER VARIABLE: Set which key you would like to be the "next tile" key.
 var advance_key = "H";
 //END USER VARIABLE
-
-// Determine user location (tile ID)
-var userloc;
-var squad = false;
-var height = unsafeWindow.navSizeVer;
-var width = unsafeWindow.navSizeHor;
-if(unsafeWindow.userloc !== undefined) {
-    userloc = unsafeWindow.userloc;
-} else { 
-    // only applies to squads: need to calculate tile ID from the IDs of accessible and adjacent tiles
-    squad = true;
-    var north = document.getElementById("navarea").rows[(height-1)/2 - 1].cells[(width-1)/2].firstChild;
-    var south = document.getElementById("navarea").rows[(height-1)/2 + 1].cells[(width-1)/2].firstChild;
-    var south = document.getElementById("navarea").rows[(height-1)/2 + 1].cells[(width-1)/2].firstChild;
-    var west = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2 - 1].firstChild;
-    var east = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2 + 1].firstChild;
-    if (north.tagName == "A") {
-        userloc = parseInt(north.getAttribute("onclick").match(/\d+/)[0]) + 1;
-    } else if (south.tagName == "A") {
-        userloc = parseInt(south.getAttribute("onclick").match(/\d+/)[0]) - 1;
-    } else {
-        var westID = west.getAttribute("onclick").match(/\d+/)[0];
-        var eastID = east.getAttribute("onclick").match(/\d+/)[0];
-        userloc = 1/2 * (parseInt(westID) + parseInt(eastID));
-    }       
-}
-
-// Determine sectors and coordinates
-var sector = document.getElementById("sector").innerHTML;
-var coord = document.getElementById("coords").innerHTML;
 
 // Add the UI to the nav page below cargo
 var cargo = document.getElementById("cargo");
@@ -82,67 +55,104 @@ table.innerHTML = '<tbody>\
                         </tr>\
                     </tbody>';
 cargo.parentNode.insertBefore(table,cargo.parentNode.childNodes[3]);
+//Grab the path recorder div
 var prDiv = document.getElementById("pr_div");
 
-//If not recording and you reach the last tile on your current path, switch to the "All Paths" tab. Makes switching paths more convenient. Does not apply to squads since you often want to move multiple squads along the same path.
-if (!squad && GM_getValue("path","") !== "") {
-    var path = GM_getValue("path").split(",");
-    if (!GM_getValue("recording") && path[path.length-1] == userloc) {
-        GM_setValue("tab","allPaths");
-    }
-}
-displayTab();
+//Create the three inner divs, all hidden for now
+prDiv.innerHTML = '<div id="file_div" style="display: none;"></div>';
+prDiv.innerHTML += '<div id="current_div" style="display: none;"></div>';
+prDiv.innerHTML += '<div id="all_div" style="display: none;"></div>';
 
-document.getElementById('file').addEventListener('click', file, false);
-document.getElementById('current').addEventListener('click', current, false);
-document.getElementById('all_paths').addEventListener('click', allPaths, false);
-
-window.addEventListener('keydown', nextKey);
-
-function displayTab() {
-    if (GM_getValue("tab","current") == "file") {
-        prDiv.innerHTML='   <a id="import" title="Import a path by pasting a string." style="cursor:pointer">Import</a>\
-                            | <a id="export" title="Export path as a string for you or another user to import." style="cursor:pointer">Export</a>\
-                            | <a id="clear" title="Clear all paths." style="cursor:pointer">Clear</a>\
-                            <br>\
-                            <br>';
-        prDiv.innerHTML+='  <form>Save current path as:\
+prDiv.childNodes[0].innerHTML = '<a id="import" title="Import a path by pasting a string." style="cursor:pointer">Import</a>\
+                                | <a id="export" title="Export path as a string for you or another user to import." style="cursor:pointer">Export</a>\
+                                | <a id="clear" title="Clear all paths." style="cursor:pointer">Clear</a>\
+                                <br>\
+                                <br>\
+                                <form>Save current path as:\
                                 <br>\
                                 <input type="text" name="savePath" id="savePath">\
                                 <input type="button" name="saveButton" value="Save" id="saveButton">\
-                            </form>';
-        
-        document.getElementById('import').addEventListener('click', importPath, false);
-        document.getElementById('export').addEventListener('click', exportPath, false);
-        document.getElementById('clear').addEventListener('click', clear, false);
-        document.getElementById("saveButton").addEventListener("click", savePathAs, true);
-        
-    } else if (GM_getValue("tab","current") == "current") {
-        
-        prDiv.innerHTML='   <a id="next" title="Go to next tile on your current path." style="cursor:pointer">Next</a>\
-                            | <a id="rec_stop" title="Start recording." style="cursor:pointer">Record</a>\
-                            | <a id="clearAll" title="Clear every tile of the current path." style="cursor:pointer">Clear</a>\
-                            | <a id="clearLast" title="CLear only the last tile of the current path." style="cursor:pointer">Last</a>';
+                                </form>';
+prDiv.childNodes[1].innerHTML = '<a id="next" title="Go to next tile on your current path." style="cursor:pointer">Next</a>\
+                                | <a id="rec_stop" title="Start recording." style="cursor:pointer">Record</a>\
+                                | <a id="clearAll" title="Clear every tile of the current path." style="cursor:pointer">Clear</a>\
+                                | <a id="clearLast" title="CLear only the last tile of the current path." style="cursor:pointer">Last</a>\
+                                <ol id="path_list" style ="padding-left: 2em; margin-top: 5px; margin-bottom: 0px;"></ol>';
+prDiv.childNodes[2].innerHTML = '<a id="showAll" title="Show all paths, regardless of starting tile." style="cursor:pointer">Show All</a><br>';
 
+//On a full refresh, run the main script
+pathRecorder();
+
+//Now watch for partial refreshes, and if one happens re-run the main script
+waitForKeyElements (
+    "#navareatransition", 
+    pathRecorder
+);
+
+var userloc, squad, height, width, sector, coord;
+function pathRecorder() {
+    
+    // Determine user location (tile ID)
+    squad = false;
+    height = unsafeWindow.navSizeVer;
+    width = unsafeWindow.navSizeHor;
+    if(unsafeWindow.userloc !== undefined) {
+        userloc = unsafeWindow.userloc;
+    } else { 
+        // only applies to squads: need to calculate tile ID from the IDs of accessible and adjacent tiles
+        squad = true;
+        var north = document.getElementById("navarea").rows[(height-1)/2 - 1].cells[(width-1)/2].firstChild;
+        var south = document.getElementById("navarea").rows[(height-1)/2 + 1].cells[(width-1)/2].firstChild;
+        var west = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2 - 1].firstChild;
+        var east = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2 + 1].firstChild;
+        if (north.tagName == "A") {
+            userloc = parseInt(north.getAttribute("onclick").match(/\d+/)[0]) + 1;
+        } else if (south.tagName == "A") {
+            userloc = parseInt(south.getAttribute("onclick").match(/\d+/)[0]) - 1;
+        } else {
+            var westID = west.getAttribute("onclick").match(/\d+/)[0];
+            var eastID = east.getAttribute("onclick").match(/\d+/)[0];
+            userloc = 1/2 * (parseInt(westID) + parseInt(eastID));
+        }       
+    }
+
+    // Determine sectors and coordinates
+    sector = document.getElementById("sector").innerHTML;
+    coord = document.getElementById("coords").innerHTML;
+
+    //If not recording and you reach the last tile on your current path, switch to the "All Paths" tab. Makes switching paths more convenient. Does not apply to squads since you often want to move multiple squads along the same path.
+    if (!squad && GM_getValue("path","") !== "") {
+        var path = GM_getValue("path").split(",");
+        if (!GM_getValue("recording") && path[path.length-1] == userloc) {
+            GM_setValue("tab","allPaths");
+        }
+    }
+    displayTab();
+
+    document.getElementById('file').addEventListener('click', file, false);
+    document.getElementById('current').addEventListener('click', current, false);
+    document.getElementById('all_paths').addEventListener('click', allPaths, false);
+
+    window.addEventListener('keydown', nextKey);
+
+}
+
+function displayTab() {                                    
+    if (GM_getValue("tab","current") == "file") {
+        prDiv.childNodes[0].style = '';
+    } else if (GM_getValue("tab","current") == "current") {
+        prDiv.childNodes[1].style = '';
+        
         //check if recording is turned on
         if (GM_getValue("recording")) {
             document.getElementById('rec_stop').innerHTML = "Stop";
             document.getElementById('rec_stop').title = "Stop recording.";
             recordLocation();
         }
-
-        //make and insert list of tiles on the current path
-        prDiv.innerHTML += '<ol id="path_list" style ="padding-left: 2em; margin-top: 5px; margin-bottom: 0px;"></ol>';
+        
         updateList();
-        
-        document.getElementById('next').addEventListener('click', next, false);
-        document.getElementById('rec_stop').addEventListener('click', rec_stop, false);
-        document.getElementById('clearAll').addEventListener('click', clearAll, false);
-        document.getElementById('clearLast').addEventListener('click', clearLast, false);
-        
     } else {
-        
-        prDiv.innerHTML='<a id="showAll" title="Show all paths, regardless of starting tile." style="cursor:pointer">Show All</a><br>';
+        prDiv.childNodes[2].style = '';
         var list = '<ol id="path_list" style ="padding-left: 2em; margin-top: 5px; margin-bottom: 0px;">';
         var paths;
         if (GM_getValue("paths","") !== "") {
@@ -159,6 +169,7 @@ function displayTab() {
         list += '</ol>';
         prDiv.innerHTML += list;
         
+        
         for (i=1; i < paths.length; i++) {
             function addListeners() {
                 var eye = i;
@@ -171,20 +182,35 @@ function displayTab() {
         }
         document.getElementById('showAll').addEventListener('click', showAll, false);
     }
+    
+    document.getElementById('import').addEventListener('click', importPath, false);
+    document.getElementById('export').addEventListener('click', exportPath, false);
+    document.getElementById('clear').addEventListener('click', clear, false);
+    document.getElementById("saveButton").addEventListener("click", savePathAs, true);
+    document.getElementById('next').addEventListener('click', next, false);
+    document.getElementById('rec_stop').addEventListener('click', rec_stop, false);
+    document.getElementById('clearAll').addEventListener('click', clearAll, false);
+    document.getElementById('clearLast').addEventListener('click', clearLast, false);
 }
 
 function file() {
     GM_setValue("tab","file");
+    prDiv.childNodes[1].style = 'display: none;';
+    prDiv.childNodes[2].style = 'display: none;';
     displayTab();
 }
 
 function current() {
     GM_setValue("tab","current");
+    prDiv.childNodes[0].style = 'display: none;';
+    prDiv.childNodes[2].style = 'display: none;';
     displayTab();
 }
 
 function allPaths() {
     GM_setValue("tab","allPaths");
+    prDiv.childNodes[0].style = 'display: none;';
+    prDiv.childNodes[1].style = 'display: none;';
     displayTab();
 }
 
@@ -257,6 +283,12 @@ function savePathAs () {
 }
 
 function next() {
+    
+    //Determine if partial refresh is turned on or not
+    var partial = unsafeWindow.ajax;
+    var ajax = '';
+    if (partial) ajax = "Ajax";
+    
     if (document.getElementById('rec_stop').innerHTML == "Stop") {
         rec_stop();
     }
@@ -277,7 +309,7 @@ function next() {
         for (i = 1; i < path.length-1; i++) {
             if (path[i] == userloc) {
                 if (sectors[i] == sectors[i+1]) {
-                    unsafeWindow.location.href = "javascript:nav(" + path[i+1] + ")";
+                    unsafeWindow.location.href = "javascript:nav" + ajax + "(" + path[i+1] + ")";
                     return;
                 } else {
                     var centreImg = document.getElementById("navarea").rows[(height-1)/2].cells[(width-1)/2].getElementsByTagName("IMG")[0].src;
@@ -296,7 +328,7 @@ function next() {
                         unsafeWindow.location.href = enter_exit;
                         return;
                     } else {
-                        unsafeWindow.location.href = "javascript:warp(" + path[i] + ")";
+                        unsafeWindow.location.href = "javascript:warp" + ajax + "(" + path[i] + ")";
                         return;
                     }
                 }
