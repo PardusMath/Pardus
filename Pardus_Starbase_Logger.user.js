@@ -10,7 +10,7 @@
 // @include     http*://orion.pardus.at/shipyard.php*
 // @include     http*://orion.pardus.at/hire_squadrons.php*
 // @include     http*://orion.pardus.at/statistics.php*
-// @version     2.2
+// @version     2.3
 // @require     http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js
 // @require     https://greasyfork.org/scripts/1003-wait-for-key-elements/code/Wait%20for%20key%20elements.js?version=49342
 // @grant       GM_addStyle
@@ -241,7 +241,6 @@ if (location.href.indexOf("main.php") > -1) {
             
         } else {
             //We're not in a SB, so just record the sector, coords, and tile id in a local variable.
-            alert(userLoc);
             GM_setValue("currentSector",sector);
             GM_setValue("currentCoords",coords);
             GM_setValue("currentuserLoc",userLoc);
