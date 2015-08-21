@@ -10,7 +10,10 @@
 // @include     http*://orion.pardus.at/shipyard.php*
 // @include     http*://orion.pardus.at/hire_squadrons.php*
 // @include     http*://orion.pardus.at/statistics.php*
-// @version     1.5
+// @version     2.2
+// @require     http://ajax.googleapis.com/ajax/libs/jquery/1.8.3/jquery.min.js
+// @require     https://greasyfork.org/scripts/1003-wait-for-key-elements/code/Wait%20for%20key%20elements.js?version=49342
+// @grant       GM_addStyle
 // @grant       GM_getValue
 // @grant       GM_setValue
 // @grant       unsafeWindow
@@ -79,165 +82,191 @@ var dataStr = '';
 
 if (location.href.indexOf("main.php") > -1) {
     
-    //Find the sector, coords, and tile id. If necessary trim away links (such as if QI Augmenter executes first and makes the coordinates a link to a map).
-    var sector = document.getElementById("sector").innerHTML;
-    if (sector.indexOf("<") > -1) {
-        sector = document.getElementById("sector").firstChild.innerHTML;
-    }
-    var coords = document.getElementById("coords").innerHTML;
-    if (coords.indexOf("<") > -1) {
-        coords = document.getElementById("coords").firstChild.innerHTML;
-    }
-    var userLoc = unsafeWindow.userloc;
-    
-    if (document.body.innerHTML.indexOf('Exit inner starbase') > -1) {
+    //Due to partial refresh, we may need to collect data multiple times per full refresh, so we will run the following function each partial refresh.
+    function mainPage() {
+        //Need to clear dataStr again in case we already collected data since the last full refresh
+        dataStr = '';
         
-        //We're inside a SB, so record the different SB buildings we can see and their locations.
+        //We want a different table element depending on if this is a partial refresh or not
+        var partialLoad = false;
+        if (document.getElementById('navareatransition')) {partialLoad = true;}        
+        var navTable;
+        if (partialLoad) {
+            navTable = document.getElementById('navareatransition');
+        } else {
+            navTable = document.getElementById('navarea');
+        }
 
-        addIdAndSectorAndCoordsToDataStr();
-
-        //Since we're in a SB, the "sector" name is really the SB name.
-        var baseName = sector;
-        addToDataStr(nameEntry, baseName);        
-        
-        //Define abbreviations for the lengthy SB building names
-        var abbreviations = {
-                                'Armor Factory' : 'Armor',
-                                'Shield Factory' : 'Shield',
-                                'Engines Factory' : 'Drive',
-                                'Weapons Factory' : 'Weapon',
-                                'Special Equipment Factory' : 'Special',
-                                'Shipyard (small)' : 'Sml Ship',
-                                'Shipyard (medium)' : 'Med Ship',
-                                'Shipyard (huge)' : 'Huge Ship',
-                                'Light Defense Artillery' : 'LDA',
-                                'Standard Defense Artillery' : 'SDA',
-                                'Heavy Defense Artillery' : 'HDA',
-                                'Repair Facility' : 'Repair',
-                                'Warehouse' : 'Warehouse',
-                                'Short Range Scanner' : 'SRS'
-                            };
-        
-        var coordsArray = coords.replace(/\[|\]/g,'').split(',');
-        var xShip = parseInt(coordsArray[0]);
-        var yShip = parseInt(coordsArray[1]);
-        var topLeftID = userLoc - 13*xShip - yShip; //Inner SB is a 13x13 grid.
-        
-        //First record all buildings in view.        
-        var buildings = document.getElementsByClassName('navBuilding');
-        var tileID, xBuild, yBuild, buildingCoords, buildingName;
-        for (var i=0; i<buildings.length; i++) {
-            //Figure out building coords by comparing its tile id to the top left id to figure out its relative position.
-            tileID = parseInt(buildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
-            xBuild = Math.floor( (tileID - topLeftID)/13 );
-            yBuild = (tileID - 13*xBuild) - topLeftID;
-            buildingCoords = xBuild + ',' + yBuild;
-            //If it's one of the player-made SB buildings (i.e. not a hab ring or CC), record the building type.
-            if (sbBuildingsEntry[buildingCoords]) {
-                buildingName = buildings[i].firstChild.firstChild.getAttribute('title');
-                buildingName = abbreviations[buildingName];
-                addToDataStr(sbBuildingsEntry[buildingCoords],buildingName);
-            }
+        //Find the sector, coords, and tile id. If necessary trim away links (such as if QI Augmenter executes first and makes the coordinates a link to a map).
+        var sector = document.getElementById("sector").innerHTML;
+        if (sector.indexOf("<") > -1) {
+            sector = document.getElementById("sector").firstChild.innerHTML;
         }
+        var coords = document.getElementById("coords").innerHTML;
+        if (coords.indexOf("<") > -1) {
+            coords = document.getElementById("coords").firstChild.innerHTML;
+        }
+        var userLoc = unsafeWindow.userloc;
         
-        //Next, record any empty building slots in view.
-        var notBuildings = document.getElementsByClassName('navClear');
-        var tileID, xCoord, yCoord, tileCoords, tileType, image;
-        for (var i=0; i<notBuildings.length; i++) {
-            //Check if the background image matches an empty slot.
-            image = notBuildings[i].firstChild.firstChild.src;
-            if (image.indexOf('ground_hor') > -1 || image.indexOf('ground_ver') > -1) {
-                //Figure out tile coords by comparing its tile id to the top left id to figure out its relative position.
-                tileID = parseInt(notBuildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
-                xCoord = Math.floor( (tileID - topLeftID)/13 );
-                yCoord = (tileID - 13*xCoord) - topLeftID;
-                tileCoords = xCoord + ',' + yCoord;
-                addToDataStr(sbBuildingsEntry[tileCoords],'Empty');
-            }
-        }
-        //We have to check if our ship is on an empty building slot seperately.
-        if (document.getElementsByClassName('navShip')[0]) {
-            var ourTile = document.getElementsByClassName('navShip')[0];
-            //Check if the background image matches an empty slot.
-            image = ourTile.getAttribute('style');
-            if (image.indexOf('ground_hor') > -1 || image.indexOf('ground_ver') > -1) {
-                tileCoords = xShip + ',' + yShip;
-                addToDataStr(sbBuildingsEntry[tileCoords],'Empty');
-            }
-        }
-        
-        //Finally, if we can see the end of any pylon, then we know how many rings there are and thus the outer rings have no slots available.
-        var tileID, xCoord, yCoord, tileCoords, tileType, image;
-        var foundEnd = false; //Have we found the end of a pylon yet? (Only need to find one.)
-        for (var i=0; i<notBuildings.length; i++) {
-            //Check if the background image matches the end of a pylon.
-            image = notBuildings[i].firstChild.firstChild.src;
-            if (image.indexOf('groundend') > -1) {
-                //Figure out tile coords by comparing its tile id to the top left id to figure out its relative position.
-                tileID = parseInt(notBuildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
-                xCoord = Math.floor( (tileID - topLeftID)/13 );
-                yCoord = (tileID - 13*xCoord) - topLeftID;
-                foundEnd = true;
-                break; //Every end of pylon gives us the same info, so no need to look for more.
-            }
-        }
-        if (!foundEnd) {
+        if (document.body.innerHTML.indexOf('Exit inner starbase') > -1) {
             
-            //We have not found the end of a pylon yet. Last place to check is under the ship!
-            var ourTile = document.getElementsByClassName('navShip')[0];
-            //Check if the background image matches the end of a pylon.
-            image = ourTile.getAttribute('style');
-            if (image.indexOf('groundend') > -1) {
-                xCoord = xShip;
-                yCoord = yShip;
-                foundEnd = true;
+            //We're inside a SB, so record the different SB buildings we can see and their locations.
+
+            addIdAndSectorAndCoordsToDataStr();
+
+            //Since we're in a SB, the "sector" name is really the SB name.
+            var baseName = sector;
+            addToDataStr(nameEntry, baseName);        
+            
+            //Define abbreviations for the lengthy SB building names
+            var abbreviations = {
+                                    'Armor Factory' : 'Armor',
+                                    'Shield Factory' : 'Shield',
+                                    'Engines Factory' : 'Drive',
+                                    'Weapons Factory' : 'Weapon',
+                                    'Special Equipment Factory' : 'Special',
+                                    'Shipyard (small)' : 'Sml Ship',
+                                    'Shipyard (medium)' : 'Med Ship',
+                                    'Shipyard (huge)' : 'Huge Ship',
+                                    'Light Defense Artillery' : 'LDA',
+                                    'Standard Defense Artillery' : 'SDA',
+                                    'Heavy Defense Artillery' : 'HDA',
+                                    'Repair Facility' : 'Repair',
+                                    'Warehouse' : 'Warehouse',
+                                    'Short Range Scanner' : 'SRS'
+                                };
+            
+            var coordsArray = coords.replace(/\[|\]/g,'').split(',');
+            var xShip = parseInt(coordsArray[0]);
+            var yShip = parseInt(coordsArray[1]);
+            var topLeftID = userLoc - 13*xShip - yShip; //Inner SB is a 13x13 grid.
+            
+            //First record all buildings in view.        
+            var buildings = navTable.getElementsByClassName('navBuilding');
+            var tileID, xBuild, yBuild, buildingCoords, buildingName;
+            for (var i=0; i<buildings.length; i++) {
+                //Figure out building coords by comparing its tile id to the top left id to figure out its relative position.
+                tileID = parseInt(buildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
+                xBuild = Math.floor( (tileID - topLeftID)/13 );
+                yBuild = (tileID - 13*xBuild) - topLeftID;
+                buildingCoords = xBuild + ',' + yBuild;
+                //If it's one of the player-made SB buildings (i.e. not a hab ring or CC), record the building type.
+                if (sbBuildingsEntry[buildingCoords]) {
+                    buildingName = buildings[i].firstChild.firstChild.getAttribute('title');
+                    buildingName = abbreviations[buildingName];
+                    addToDataStr(sbBuildingsEntry[buildingCoords],buildingName);
+                }
             }
-        }                
-        
-        //Based on the coordinates of the pylon ending we found, we know certain rings do no exist.
-        if (foundEnd) {
-            if (xCoord + yCoord >= 9 && xCoord + yCoord <= 15) {
-                //No second ring.
-                addToDataStr(sbBuildingsEntry['6,3'],'-');
-                addToDataStr(sbBuildingsEntry['9,6'],'-');
-                addToDataStr(sbBuildingsEntry['6,9'],'-');
-                addToDataStr(sbBuildingsEntry['3,6'],'-');
+            
+            //Next, record any empty building slots in view.
+            var notBuildings = navTable.getElementsByClassName('navClear');
+            var tileID, xCoord, yCoord, tileCoords, tileType, image;
+            for (var i=0; i<notBuildings.length; i++) {
+                //Check if the background image matches an empty slot.
+                image = notBuildings[i].firstChild.firstChild.src;
+                if (image.indexOf('ground_hor') > -1 || image.indexOf('ground_ver') > -1) {
+                    //Figure out tile coords by comparing its tile id to the top left id to figure out its relative position.
+                    tileID = parseInt(notBuildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
+                    xCoord = Math.floor( (tileID - topLeftID)/13 );
+                    yCoord = (tileID - 13*xCoord) - topLeftID;
+                    tileCoords = xCoord + ',' + yCoord;
+                    addToDataStr(sbBuildingsEntry[tileCoords],'Empty');
+                }
             }
-            if (xCoord + yCoord >= 8 && xCoord + yCoord <= 16) {
-                //No third ring.
-                addToDataStr(sbBuildingsEntry['6,2'],'-');
-                addToDataStr(sbBuildingsEntry['10,6'],'-');
-                addToDataStr(sbBuildingsEntry['6,10'],'-');
-                addToDataStr(sbBuildingsEntry['2,6'],'-');
+            //We have to check if our ship is on an empty building slot seperately.
+            if (navTable.getElementsByClassName('navShip')[0]) {
+                var ourTile = navTable.getElementsByClassName('navShip')[0];
+                //Check if the background image matches an empty slot.
+                image = ourTile.getAttribute('style');
+                if (image.indexOf('ground_hor') > -1 || image.indexOf('ground_ver') > -1) {
+                    tileCoords = xShip + ',' + yShip;
+                    addToDataStr(sbBuildingsEntry[tileCoords],'Empty');
+                }
             }
-            if (xCoord + yCoord >= 7 && xCoord + yCoord <= 17) {
-                //No fourth ring.
-                addToDataStr(sbBuildingsEntry['6,1'],'-');
-                addToDataStr(sbBuildingsEntry['11,6'],'-');
-                addToDataStr(sbBuildingsEntry['6,11'],'-');
-                addToDataStr(sbBuildingsEntry['1,6'],'-');
+            
+            //Finally, if we can see the end of any pylon, then we know how many rings there are and thus the outer rings have no slots available.
+            var tileID, xCoord, yCoord, tileCoords, tileType, image;
+            var foundEnd = false; //Have we found the end of a pylon yet? (Only need to find one.)
+            for (var i=0; i<notBuildings.length; i++) {
+                //Check if the background image matches the end of a pylon.
+                image = notBuildings[i].firstChild.firstChild.src;
+                if (image.indexOf('groundend') > -1) {
+                    //Figure out tile coords by comparing its tile id to the top left id to figure out its relative position.
+                    tileID = parseInt(notBuildings[i].firstChild.getAttribute("onclick").match(/\d+/)[0]);
+                    xCoord = Math.floor( (tileID - topLeftID)/13 );
+                    yCoord = (tileID - 13*xCoord) - topLeftID;
+                    foundEnd = true;
+                    break; //Every end of pylon gives us the same info, so no need to look for more.
+                }
             }
+            if (!foundEnd) {
+                
+                //We have not found the end of a pylon yet. Last place to check is under the ship!
+                var ourTile = navTable.getElementsByClassName('navShip')[0];
+                //Check if the background image matches the end of a pylon.
+                image = ourTile.getAttribute('style');
+                if (image.indexOf('groundend') > -1) {
+                    xCoord = xShip;
+                    yCoord = yShip;
+                    foundEnd = true;
+                }
+            }                
+            
+            //Based on the coordinates of the pylon ending we found, we know certain rings do no exist.
+            if (foundEnd) {
+                if (xCoord + yCoord >= 9 && xCoord + yCoord <= 15) {
+                    //No second ring.
+                    addToDataStr(sbBuildingsEntry['6,3'],'-');
+                    addToDataStr(sbBuildingsEntry['9,6'],'-');
+                    addToDataStr(sbBuildingsEntry['6,9'],'-');
+                    addToDataStr(sbBuildingsEntry['3,6'],'-');
+                }
+                if (xCoord + yCoord >= 8 && xCoord + yCoord <= 16) {
+                    //No third ring.
+                    addToDataStr(sbBuildingsEntry['6,2'],'-');
+                    addToDataStr(sbBuildingsEntry['10,6'],'-');
+                    addToDataStr(sbBuildingsEntry['6,10'],'-');
+                    addToDataStr(sbBuildingsEntry['2,6'],'-');
+                }
+                if (xCoord + yCoord >= 7 && xCoord + yCoord <= 17) {
+                    //No fourth ring.
+                    addToDataStr(sbBuildingsEntry['6,1'],'-');
+                    addToDataStr(sbBuildingsEntry['11,6'],'-');
+                    addToDataStr(sbBuildingsEntry['6,11'],'-');
+                    addToDataStr(sbBuildingsEntry['1,6'],'-');
+                }
+            }
+            
+            sendData();
+            
+        } else {
+            //We're not in a SB, so just record the sector, coords, and tile id in a local variable.
+            alert(userLoc);
+            GM_setValue("currentSector",sector);
+            GM_setValue("currentCoords",coords);
+            GM_setValue("currentuserLoc",userLoc);
         }
-        
-        sendData();
-        
-    } else {
-        //We're not in a SB, so just record the sector, coords, and tile id in a local variable.
-        GM_setValue("currentSector",sector);
-        GM_setValue("currentCoords",coords);
-        GM_setValue("currentuserLoc",userLoc);
     }
+    
+    //Now automatically run the above code on a full refresh    
+    mainPage();
+    
+    //And wait for a new nav table to pop up, alerting us of a partial refresh.
+    waitForKeyElements (
+        "#navareatransition", 
+        mainPage
+    );
     
 } else if (location.href.indexOf("starbase_trade.php") > -1) {
     
     addIdAndSectorAndCoordsToDataStr();
     
     //Find the name of the SB
-    var images = document.getElementsByTagName("IMG");
+    var links = document.getElementsByTagName("A");
     var baseName;
-    for (i=0; i < images.length; i++) {
-        if (images[i].src.indexOf("starbase") > -1) {
-            baseName = images[i].alt;
+    for (var i=0; i < links.length; i++) {
+        if (links[i].href.indexOf("starbase.php") > -1) {
+            baseName = links[i].innerHTML;
             break;
         }
     }
@@ -480,7 +509,7 @@ function addIdAndSectorAndCoordsToDataStr() {
     //Off the nav screen, Pardus will only tell you the tile id, so check that the stored tile id is correct to make sure partial refresh didn't screw us up.
     //If everything is good, grab the stored sector and coords.
     var sector, coords;
-    if (GM_getValue("currentuserLoc","undefined") === unsafeWindow.userloc) {
+    if (GM_getValue("currentuserLoc","undefined") == unsafeWindow.userloc) {
         sector = GM_getValue("currentSector","undefined");
         coords = GM_getValue("currentCoords","undefined");
     }
@@ -492,7 +521,7 @@ function addToDataStr(entry, data) {
     dataStr += "&entry." + entry + "=" + data;
 }
 
-function addWorkersToDataString(workers, exact) {
+function addWorkersToDataStr(workers, exact) {
     //Based on the number of workers, we can determine which rings cannot have buildings on them.
     if (workers < 30000) {
         addToDataStr(sbBuildingsEntry['6,1'],'-');
